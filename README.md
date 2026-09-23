@@ -1,4 +1,4 @@
-# Clan Clash Lite
+# Clan game
 
 Basic real-time 4-player base-battler. Node.js + Express + Socket.io backend,
 vanilla HTML/CSS/JS frontend. In-memory lobbies, JSON-file leaderboard.
