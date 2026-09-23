@@ -1,0 +1,13 @@
+{
+  "name": "clan-clash-lite",
+  "version": "1.0.0",
+  "description": "Clan Clash Lite - basic real-time 4-player base battler",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  }
+}

@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Clan Clash Lite</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- HOME SCREEN -->
+<div id="screen-home" class="screen active">
+  <div class="panel home-panel">
+    <h1>⚔️ Clan Clash <span class="lite">Lite</span></h1>
+    <input id="nickname-input" maxlength="16" placeholder="Enter nickname" />
+
+    <div class="home-actions">
+      <button id="btn-create" class="btn btn-primary">Create Lobby</button>
+      <div class="join-row">
+        <input id="code-input" maxlength="5" placeholder="LOBBY CODE" style="text-transform:uppercase" />
+        <button id="btn-join" class="btn btn-secondary">Join</button>
+      </div>
+    </div>
+
+    <div class="leaderboard-box">
+      <h3>🏆 Global Leaderboard</h3>
+      <div id="leaderboard-list" class="leaderboard-list"><em>Loading...</em></div>
+    </div>
+
+    <div id="home-error" class="error-msg"></div>
+  </div>
+</div>
+
+<!-- LOBBY SCREEN -->
+<div id="screen-lobby" class="screen">
+  <div class="panel lobby-panel">
+    <h2>Lobby Code: <span id="lobby-code-display"></span></h2>
+    <p class="hint">Share this code with friends so they can join.</p>
+    <div id="lobby-players" class="lobby-players"></div>
+    <div class="lobby-actions">
+      <button id="btn-ready" class="btn btn-secondary">Ready</button>
+      <button id="btn-start" class="btn btn-primary" style="display:none">Start Game</button>
+    </div>
+    <div id="lobby-error" class="error-msg"></div>
+  </div>
+</div>
+
+<!-- GAME SCREEN -->
+<div id="screen-game" class="screen">
+  <div class="game-layout">
+
+    <div class="game-topbar">
+      <div id="match-timer">10:00</div>
+      <div id="my-gold-display">💰 0</div>
+    </div>
+
+    <div class="bases-row" id="bases-row"></div>
+
+    <div class="game-main">
+      <div class="panel train-panel">
+        <h3>Train Troops</h3>
+        <div id="train-list" class="train-list"></div>
+      </div>
+
+      <div class="panel attack-panel">
+        <h3>Attack</h3>
+        <div class="field">
+          <label>Target</label>
+          <select id="attack-target"></select>
+        </div>
+        <div id="attack-troop-inputs" class="attack-troop-inputs"></div>
+        <button id="btn-attack" class="btn btn-danger">⚔️ Attack</button>
+        <div id="attack-error" class="error-msg"></div>
+      </div>
+
+      <div class="panel chat-panel">
+        <h3>Private Chat</h3>
+        <div class="field">
+          <label>Talk to</label>
+          <select id="chat-target"></select>
+        </div>
+        <div id="chat-messages" class="chat-messages"></div>
+        <div class="chat-input-row">
+          <input id="chat-input" placeholder="Type a message..." maxlength="500" />
+          <button id="btn-send-chat" class="btn btn-secondary">Send</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel scoreboard-panel">
+      <h3>Scoreboard</h3>
+      <div id="scoreboard-list"></div>
+    </div>
+
+    <div id="battle-log" class="battle-log"></div>
+  </div>
+</div>
+
+<!-- GAME OVER MODAL -->
+<div id="modal-gameover" class="modal-overlay">
+  <div class="modal-box">
+    <h2 id="gameover-title">Game Over</h2>
+    <div id="gameover-scores"></div>
+    <button id="btn-back-home" class="btn btn-primary">Back to Home</button>
+  </div>
+</div>
+
+<!-- ALLIANCE REQUEST TOAST -->
+<div id="alliance-toast" class="toast" style="display:none">
+  <span id="alliance-toast-text"></span>
+  <button id="alliance-accept" class="btn btn-small btn-primary">Accept</button>
+  <button id="alliance-decline" class="btn btn-small btn-secondary">Decline</button>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
