@@ -54,42 +54,56 @@
       <div id="my-gold-display">💰 0</div>
     </div>
 
-    <div class="bases-row" id="bases-row"></div>
-
-    <div class="game-main">
-      <div class="panel train-panel">
-        <h3>Train Troops</h3>
-        <div id="train-list" class="train-list"></div>
-      </div>
-
-      <div class="panel attack-panel">
-        <h3>Attack</h3>
-        <div class="field">
-          <label>Target</label>
-          <select id="attack-target"></select>
+    <div class="game-body">
+      <!-- LEFT CONTROLS -->
+      <div class="side-panel left-panel">
+        <div class="panel train-panel">
+          <h3>Train Troops</h3>
+          <div id="train-list" class="train-list"></div>
         </div>
-        <div id="attack-troop-inputs" class="attack-troop-inputs"></div>
-        <button id="btn-attack" class="btn btn-danger">⚔️ Attack</button>
-        <div id="attack-error" class="error-msg"></div>
-      </div>
 
-      <div class="panel chat-panel">
-        <h3>Private Chat</h3>
-        <div class="field">
-          <label>Talk to</label>
-          <select id="chat-target"></select>
-        </div>
-        <div id="chat-messages" class="chat-messages"></div>
-        <div class="chat-input-row">
-          <input id="chat-input" placeholder="Type a message..." maxlength="500" />
-          <button id="btn-send-chat" class="btn btn-secondary">Send</button>
+        <div class="panel attack-panel">
+          <h3>Attack</h3>
+          <div class="field">
+            <label>Target</label>
+            <select id="attack-target"></select>
+          </div>
+          <div id="attack-troop-inputs" class="attack-troop-inputs"></div>
+          <button id="btn-attack" class="btn btn-danger">⚔️ Attack</button>
+          <div id="attack-error" class="error-msg"></div>
         </div>
       </div>
-    </div>
 
-    <div class="panel scoreboard-panel">
-      <h3>Scoreboard</h3>
-      <div id="scoreboard-list"></div>
+      <!-- CENTER MAP -->
+      <div class="map-wrapper">
+        <div id="battle-map" class="battle-map">
+          <div class="map-terrain"></div>
+          <div id="castles-layer" class="castles-layer"></div>
+          <div id="troops-layer" class="troops-layer"></div>
+          <div id="fx-layer" class="fx-layer"></div>
+        </div>
+      </div>
+
+      <!-- RIGHT SIDE -->
+      <div class="side-panel right-panel">
+        <div class="panel scoreboard-panel">
+          <h3>Scoreboard</h3>
+          <div id="scoreboard-list"></div>
+        </div>
+
+        <div class="panel chat-panel">
+          <h3>Private Chat</h3>
+          <div class="field">
+            <label>Talk to</label>
+            <select id="chat-target"></select>
+          </div>
+          <div id="chat-messages" class="chat-messages"></div>
+          <div class="chat-input-row">
+            <input id="chat-input" placeholder="Type a message..." maxlength="500" />
+            <button id="btn-send-chat" class="btn btn-secondary">Send</button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div id="battle-log" class="battle-log"></div>

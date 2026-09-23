@@ -7,6 +7,17 @@ let currentGameState = null;
 let chatTargetId = null;
 let chatHistories = {}; // targetId -> [{fromId, fromName, message, timestamp}]
 
+// Fixed slot positions on the map (percentages)
+const SLOT_POSITIONS = [
+  { x: 22, y: 22 },  // top-left
+  { x: 78, y: 22 },  // top-right
+  { x: 22, y: 78 },  // bottom-left
+  { x: 78, y: 78 },  // bottom-right
+];
+
+// Map playerId -> slot index (stable for a match)
+let playerSlots = {};
+
 // ---------- Screen helpers ----------
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -107,6 +118,16 @@ const TROOP_ICONS = { barbarian: '🪓', archer: '🏹', giant: '👹', wizard: 
 socket.on('game_started', (state) => {
   showScreen('screen-game');
   currentGameState = state;
+  // Assign stable slots
+  playerSlots = {};
+  state.players.forEach((p, i) => {
+    playerSlots[p.id] = i % 4;
+  });
+  // Clear previous layers
+  document.getElementById('castles-layer').innerHTML = '';
+  document.getElementById('troops-layer').innerHTML = '';
+  document.getElementById('fx-layer').innerHTML = '';
+  document.getElementById('battle-log').innerHTML = '';
   renderGame(state);
 });
 
@@ -116,7 +137,7 @@ socket.on('game_update', (state) => {
 });
 
 function renderGame(state) {
-  renderBases(state);
+  renderCastles(state);
   renderTrainPanel(state);
   renderAttackTargets(state);
   renderChatTargets(state);
@@ -147,11 +168,23 @@ function isAlly(state, otherId) {
   return state.alliances.includes(key);
 }
 
-function renderBases(state) {
-  const el = document.getElementById('bases-row');
-  el.innerHTML = state.players.map(p => {
+function getCastlePos(playerId) {
+  const slot = playerSlots[playerId] ?? 0;
+  return SLOT_POSITIONS[slot];
+}
+
+function renderCastles(state) {
+  const layer = document.getElementById('castles-layer');
+  // Keep existing castles if possible and just update content to avoid flicker
+  const existing = {};
+  layer.querySelectorAll('.castle').forEach(el => {
+    existing[el.dataset.pid] = el;
+  });
+
+  state.players.forEach(p => {
+    const pos = getCastlePos(p.id);
     const pct = Math.round((p.base.health / p.base.maxHealth) * 100);
-    const classes = ['base-card'];
+    const classes = ['castle'];
     if (p.id === myId) classes.push('me');
     else if (isAlly(state, p.id)) classes.push('ally');
     if (!p.alive) classes.push('dead');
@@ -159,29 +192,48 @@ function renderBases(state) {
     const troopsStr = Object.entries(p.troops)
       .filter(([, c]) => c > 0)
       .map(([t, c]) => `${TROOP_ICONS[t]}${c}`)
-      .join(' ') || 'No troops';
+      .join(' ') || '—';
 
     let actionBtns = '';
     if (p.id !== myId && p.alive) {
       if (isAlly(state, p.id)) {
-        actionBtns = `<button class="btn btn-small btn-secondary" onclick="breakAlliance('${p.id}')">Break Alliance</button>`;
+        actionBtns = `<button class="btn btn-small btn-secondary" onclick="breakAlliance('${p.id}')">Break Ally</button>`;
       } else {
         actionBtns = `<button class="btn btn-small btn-secondary" onclick="proposeAlliance('${p.id}')">🤝 Ally</button>`;
       }
     }
 
-    return `
-      <div class="${classes.join(' ')}">
-        <div class="base-name">
-          <span>${p.id === myId ? '🏠 You' : escapeHtml(p.nickname)}${isAlly(state, p.id) && p.id !== myId ? ' <span class="ally-badge">ALLY</span>' : ''}</span>
-          <span>${p.alive ? pct + '%' : '💀'}</span>
-        </div>
-        <div class="health-bar-bg"><div class="health-bar-fill" style="width:${pct}%"></div></div>
-        <div class="base-troops">${troopsStr}</div>
-        <div style="margin-top:6px">${actionBtns}</div>
+    let el = existing[p.id];
+    if (!el) {
+      el = document.createElement('div');
+      el.className = classes.join(' ');
+      el.dataset.pid = p.id;
+      el.style.left = pos.x + '%';
+      el.style.top = pos.y + '%';
+      layer.appendChild(el);
+    } else {
+      el.className = classes.join(' ');
+      // remove from existing so leftovers can be cleaned
+      delete existing[p.id];
+    }
+
+    el.innerHTML = `
+      <div class="castle-flag">${p.id === myId ? '🚩' : (isAlly(state, p.id) ? '🟢' : '🏳️')}</div>
+      <div class="castle-body"></div>
+      <div class="castle-name">
+        ${p.id === myId ? '🏠 You' : escapeHtml(p.nickname)}
+        ${isAlly(state, p.id) && p.id !== myId ? '<span class="ally-badge">ALLY</span>' : ''}
+        ${!p.alive ? ' 💀' : ''}
       </div>
+      <div class="castle-hp-text">${p.alive ? pct + '%' : 'DESTROYED'}</div>
+      <div class="castle-hp-wrap"><div class="castle-hp-fill" style="width:${p.alive ? pct : 0}%"></div></div>
+      <div class="castle-troops">${troopsStr}</div>
+      <div class="castle-actions">${actionBtns}</div>
     `;
-  }).join('');
+  });
+
+  // Remove any leftover castles (players who left)
+  Object.values(existing).forEach(el => el.remove());
 }
 
 function renderTrainPanel(state) {
@@ -245,7 +297,9 @@ document.getElementById('btn-attack').onclick = () => {
   socket.emit('attack', { targetId, troops });
 };
 
+// ---------- ATTACK ANIMATION ----------
 socket.on('attack_result', (r) => {
+  // Log text
   const log = document.getElementById('battle-log');
   const entry = document.createElement('div');
   entry.className = 'log-entry ' + (r.attackSucceeded ? 'win' : 'fail');
@@ -256,7 +310,107 @@ socket.on('attack_result', (r) => {
     entry.textContent = `🛡️ ${r.defenderName} repelled ${r.attackerName}'s attack (${sentStr})`;
   }
   log.prepend(entry);
+
+  // Visual animation
+  animateAttack(r);
 });
+
+function animateAttack(r) {
+  const fromPos = getCastlePos(r.attackerId);
+  const toPos = getCastlePos(r.defenderId);
+  const troopsLayer = document.getElementById('troops-layer');
+  const fxLayer = document.getElementById('fx-layer');
+  const map = document.getElementById('battle-map');
+  const mapW = map.clientWidth;
+  const mapH = map.clientHeight;
+
+  // Build a small visual group of troop icons (cap at ~6 icons for cleanliness)
+  const icons = [];
+  for (const [type, count] of Object.entries(r.sentTroops)) {
+    const show = Math.min(count, 3);
+    for (let i = 0; i < show; i++) icons.push(TROOP_ICONS[type]);
+  }
+  if (icons.length === 0) icons.push('⚔️');
+
+  const group = document.createElement('div');
+  group.className = 'march-group';
+  group.innerHTML = icons.map(ic => `<span class="troop-icon">${ic}</span>`).join('');
+  group.style.left = fromPos.x + '%';
+  group.style.top = fromPos.y + '%';
+  troopsLayer.appendChild(group);
+
+  // Force reflow then move
+  group.offsetHeight;
+  requestAnimationFrame(() => {
+    group.style.left = toPos.x + '%';
+    group.style.top = toPos.y + '%';
+  });
+
+  // After arrival (~1.9s) play impact + optional return
+  setTimeout(() => {
+    // Impact FX at defender
+    const exp = document.createElement('div');
+    exp.className = 'fx-explosion';
+    exp.style.left = toPos.x + '%';
+    exp.style.top = toPos.y + '%';
+    fxLayer.appendChild(exp);
+
+    const slash = document.createElement('div');
+    slash.className = 'fx-slash';
+    slash.textContent = r.attackSucceeded ? '💥' : '🛡️';
+    slash.style.left = toPos.x + '%';
+    slash.style.top = toPos.y + '%';
+    fxLayer.appendChild(slash);
+
+    if (r.baseDamage > 0) {
+      const dmg = document.createElement('div');
+      dmg.className = 'fx-dmg';
+      dmg.textContent = `-${r.baseDamage}`;
+      dmg.style.left = (toPos.x - 2) + '%';
+      dmg.style.top = (toPos.y - 8) + '%';
+      fxLayer.appendChild(dmg);
+    } else if (!r.attackSucceeded) {
+      const sh = document.createElement('div');
+      sh.className = 'fx-shield';
+      sh.textContent = '🛡️';
+      sh.style.left = toPos.x + '%';
+      sh.style.top = toPos.y + '%';
+      fxLayer.appendChild(sh);
+    }
+
+    // Clean explosion elements later
+    setTimeout(() => {
+      exp.remove();
+      slash.remove();
+    }, 700);
+
+    // If attack succeeded, troops return home
+    if (r.attackSucceeded) {
+      group.classList.add('returning');
+      group.style.transition = 'left 1.5s cubic-bezier(0.25, 0.1, 0.25, 1), top 1.5s cubic-bezier(0.25, 0.1, 0.25, 1), opacity 0.4s';
+      requestAnimationFrame(() => {
+        group.style.left = fromPos.x + '%';
+        group.style.top = fromPos.y + '%';
+      });
+      setTimeout(() => {
+        group.style.opacity = '0';
+        setTimeout(() => group.remove(), 400);
+      }, 1500);
+    } else {
+      // Troops lost – fade out at target
+      group.style.transition = 'opacity 0.5s, transform 0.5s';
+      group.style.opacity = '0';
+      group.style.transform = 'scale(0.5)';
+      setTimeout(() => group.remove(), 500);
+    }
+
+    // Clean damage numbers
+    setTimeout(() => {
+      fxLayer.querySelectorAll('.fx-dmg, .fx-shield').forEach(el => el.remove());
+    }, 1200);
+
+  }, 1900);
+}
 
 function renderScoreboard(state) {
   const el = document.getElementById('scoreboard-list');
