@@ -94,6 +94,15 @@ function renderLobby(lobby) {
 
 document.getElementById('btn-ready').onclick = () => socket.emit('toggle_ready');
 document.getElementById('btn-start').onclick = () => socket.emit('start_game');
+document.getElementById('btn-leave').onclick = () => {
+  socket.emit('leave_lobby');
+  currentLobby = null;
+  myId = null;
+  myPlayerIndex = -1;
+  document.getElementById('lobby-error').textContent = '';
+  showScreen('screen-home');
+  loadLeaderboard();
+};
 
 socket.on('error_message', (msg) => {
   const activeScreen = document.querySelector('.screen.active')?.id;
@@ -189,7 +198,7 @@ function newGame(lobbyPlayers) {
       id: i, socketId: activePlayers[i].id, nickname: activePlayers[i].nickname,
       col: COLORS[seatIdx], seat: SEATS[seatIdx], isMe: activePlayers[i].id === myId,
       gold: 100, target: (i+1)%numPlayers, hp: CASTLE_HP, alive: true, flash: 0, fireCd: 0, 
-      lastAttacker: -1, lastHitAt: -99, spawnCd: 0, income: BASE_INCOME, btn: [0,0,0,0]
+      lastAttacker: -1, lastHitAt: -99, spawnCd: 0, income: BASE_INCOME, btn: [0,0,0,0], spawnCount: 0
     });
   }
 }
@@ -206,9 +215,13 @@ function spawnUnit(p, type) {
   const T = TYPES[type];
   if(!p.alive || p.spawnCd>0 || p.gold<T.cost) return false;
   p.gold -= T.cost; p.spawnCd = .22;
-  const w = toWorld(p, rand(-140,140), -HD-12);
-  g.units.push({ id:g.nextId++, owner:p.id, type, x:w.x, y:w.y, hp:T.hp, maxHp:T.hp, cd:rand(0,.3),
-                 r:T.r, face:0, off:rand(-60,60), dead:false });
+  // Seeded (not Math.random) so every client computes the exact same spawn
+  // position/cooldown/offset for this unit, keeping the simulation in sync.
+  const seed = (p.id*100000 + p.spawnCount) * 3;
+  p.spawnCount++;
+  const w = toWorld(p, (hash(seed)*2-1)*140, -HD-12);
+  g.units.push({ id:g.nextId++, owner:p.id, type, x:w.x, y:w.y, hp:T.hp, maxHp:T.hp, cd:hash(seed+1)*.3,
+                 r:T.r, face:0, off:(hash(seed+2)*2-1)*60, dead:false });
   return true;
 }
 
@@ -572,10 +585,16 @@ function processInput(pi, ai) {
 }
 
 function emitInput(ai) {
-  if (myPlayerIndex < 0) return;
-  // Send over a custom message/chat event to relay to others
-  socket.emit('private_message', { targetId: 'ALL', message: JSON.stringify({ fk_action: ai }) });
+  if (myPlayerIndex < 0 || !g) return;
   processInput(myPlayerIndex, ai);
+  // Relay this action to every other player individually (there is no
+  // server-side "ALL" room, so broadcasting to a literal targetId of 'ALL'
+  // never reaches anyone - each recipient's actual socket id is needed).
+  const payload = JSON.stringify({ fk_action: ai });
+  for (const gp of g.players) {
+    if (gp.id === myPlayerIndex) continue;
+    socket.emit('private_message', { targetId: gp.socketId, message: payload });
+  }
 }
 
 socket.on('private_message', (msg) => {

@@ -61,6 +61,7 @@ input {
 .btn:active { transform: scale(0.97); }
 .btn-primary { background: var(--accent); width: 100%; }
 .btn-secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+.btn-danger { background: var(--danger); color: #fff; }
 
 .error-msg { color: var(--danger); font-size: 13px; min-height: 18px; margin-top: 8px; }
 .hint { color: var(--text-dim); font-size: 13px; }
