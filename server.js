@@ -40,15 +40,63 @@ function getTopLeaderboard(n = 20) {
     .slice(0, n);
 }
 
+
+// ---------- Accounts (nickname + PIN) ----------
+const ACCOUNTS_FILE = path.join(__dirname, 'accounts.json');
+function loadAccounts() {
+  try {
+    return JSON.parse(fs.readFileSync(ACCOUNTS_FILE, 'utf8'));
+  } catch (e) {
+    return {};
+  }
+}
+function saveAccounts(acc) {
+  fs.writeFileSync(ACCOUNTS_FILE, JSON.stringify(acc, null, 2));
+}
+let accounts = loadAccounts(); // { lowerNickname: { nickname, pin } }
+
+function normalizeNick(n) {
+  return (n || '').toString().trim().slice(0, 16);
+}
+
+/** Validate or register PIN. Returns { ok: true, nickname } or { ok: false, error } */
+function authNickname(nickname, pin) {
+  nickname = normalizeNick(nickname);
+  if (!nickname || nickname.length < 2) {
+    return { ok: false, error: 'Nickname must be at least 2 characters.' };
+  }
+  pin = (pin || '').toString().trim();
+  if (!/^\d{4}$/.test(pin)) {
+    return { ok: false, error: 'PIN must be exactly 4 digits.' };
+  }
+
+  const key = nickname.toLowerCase();
+  const existing = accounts[key];
+
+  if (!existing) {
+    // First time — claim the name
+    accounts[key] = { nickname, pin };
+    saveAccounts(accounts);
+    return { ok: true, nickname };
+  }
+
+  // Name already claimed — check PIN
+  if (existing.pin !== pin) {
+    return { ok: false, error: 'Wrong PIN for this nickname.' };
+  }
+  // Use the original casing stored on first claim
+  return { ok: true, nickname: existing.nickname };
+}
+
 // ---------- Lobby / Game state (in-memory) ----------
 // lobbies: { [code]: LobbyObject }
 const lobbies = {};
 
 const MAX_PLAYERS = 4;
 const STARTING_GOLD = 150;
-const STARTING_HEALTH = 1000;
-const GOLD_TICK_MS = 3000;
-const GOLD_PER_TICK = 15;
+const STARTING_HEALTH = 300;
+const GOLD_TICK_MS = 4000;
+const GOLD_PER_TICK = 12;
 const MATCH_TIME_LIMIT_MS = 10 * 60 * 1000; // 10 minutes
 
 function genCode() {
@@ -160,8 +208,11 @@ io.on('connection', (socket) => {
   socket.data.playerId = null;
   socket.data.lobbyCode = null;
 
-  socket.on('create_lobby', ({ nickname }) => {
-    nickname = (nickname || 'Player').toString().slice(0, 16);
+  socket.on('create_lobby', ({ nickname, pin }) => {
+    const auth = authNickname(nickname, pin);
+    if (!auth.ok) return socket.emit('error_message', auth.error);
+    nickname = auth.nickname;
+
     const code = genCode();
     const playerId = socket.id;
     const lobby = {
@@ -170,7 +221,7 @@ io.on('connection', (socket) => {
       status: 'waiting',
       players: {},
       alliances: new Set(),
-      pendingAllianceRequests: {}, // key targetId -> Set of requesterIds
+      pendingAllianceRequests: {},
       startedAt: null,
       goldInterval: null
     };
@@ -185,14 +236,23 @@ io.on('connection', (socket) => {
     broadcastLobby(lobby);
   });
 
-  socket.on('join_lobby', ({ nickname, code }) => {
+  socket.on('join_lobby', ({ nickname, pin, code }) => {
     code = (code || '').toString().toUpperCase().trim();
     const lobby = lobbies[code];
     if (!lobby) return socket.emit('error_message', 'Lobby not found.');
     if (lobby.status !== 'waiting') return socket.emit('error_message', 'Game already started.');
     if (Object.keys(lobby.players).length >= MAX_PLAYERS) return socket.emit('error_message', 'Lobby is full.');
 
-    nickname = (nickname || 'Player').toString().slice(0, 16);
+    const auth = authNickname(nickname, pin);
+    if (!auth.ok) return socket.emit('error_message', auth.error);
+    nickname = auth.nickname;
+
+    // Prevent same nickname joining twice in one lobby
+    const alreadyIn = Object.values(lobby.players).some(
+      p => p.nickname.toLowerCase() === nickname.toLowerCase()
+    );
+    if (alreadyIn) return socket.emit('error_message', 'That nickname is already in this lobby.');
+
     const playerId = socket.id;
     lobby.players[playerId] = makePlayer(playerId, nickname, socket.id);
 
@@ -304,18 +364,16 @@ io.on('connection', (socket) => {
     let attackSucceeded = false;
 
     if (brokeThrough && remainingPower > 0) {
-      // Attack breaks through to the base; attacking troops survive & return home
+      // Broke through garrison → damage the base. Sent troops are always consumed.
       baseDamage = remainingPower;
       defender.base.health = Math.max(0, defender.base.health - baseDamage);
-      for (const [type, c] of Object.entries(sentTroops)) attacker.troops[type] += c;
       attackSucceeded = true;
       if (defender.base.health <= 0) {
         defender.alive = false;
         pointsEarned += 150; // bonus for destroying a base
       }
-    } else {
-      // Attack repelled: sent troops are lost, only partial troop-kill points earned
     }
+    // Sent troops are always lost (consumed on both success and fail).
 
     attacker.score += pointsEarned;
 

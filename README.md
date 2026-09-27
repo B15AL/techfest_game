@@ -60,3 +60,18 @@ public/index.html - Home / Lobby / Game screens
 public/style.css  - Dark Clash-of-Clans-ish theme
 public/app.js     - Client logic (sockets, rendering, chat, attacks)
 ```
+
+## Recent fixes (v1.1)
+- Input numbers no longer reset on gold ticks / game updates
+- Base HP lowered to 300 so attacks deal visible damage
+- HP now shows absolute value (e.g. 245/300) + percent
+- Tap a castle on the map to select it as attack target
+- Gold gain popup (+15) when passive gold arrives
+- Better mobile layout, larger touch targets, no accidental zoom on inputs
+- Troop counts update correctly after attacks (lost on fail, return on success)
+
+## Nickname + PIN (v1.2)
+- Every nickname is protected by a 4-digit PIN.
+- First time you use a name → you set the PIN (saved in `accounts.json`).
+- Later visits require the same PIN.
+- Leaderboard identity is now tied to the protected nickname.
