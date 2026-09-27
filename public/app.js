@@ -189,14 +189,27 @@ function newGame(lobbyPlayers) {
   const seatMap = { 1: [0], 2: [0, 2], 3: [0, 1, 3], 4: [0, 1, 2, 3] };
   const seatsToUse = seatMap[numPlayers] || [0];
 
+  // Rotate which physical seat each player sits in so that THIS device's own
+  // player always ends up at seatsToUse[0] (South / bottom of screen). The
+  // board is fully rotationally symmetric (mine at dead-center, seats evenly
+  // spaced around it), so this is purely a per-device viewing rotation - it
+  // does not change the simulation outcome, only where "you" appear on your
+  // own screen. Each device computes its own rotation independently.
+  const rotate = myPlayerIndex >= 0 ? myPlayerIndex : 0;
+
   g = { time:0, players:[], units:[], proj:[], tracers:[], parts:[], banners:[], order:[], winner:-1,
         leader:-1, mineOwner:-1, nextId:1 };
         
   for(let i=0; i<numPlayers; i++) {
-    const seatIdx = seatsToUse[i];
+    const seatSlot = (i - rotate + numPlayers) % numPlayers;
+    const seatIdx = seatsToUse[seatSlot];
     g.players.push({
+      // Color is tied to the player's stable index (same order on every
+      // device, from the shared lobby list) rather than the seat, so a
+      // given player is always the same color for everyone, regardless of
+      // where their castle is rotated to on each viewer's own screen.
       id: i, socketId: activePlayers[i].id, nickname: activePlayers[i].nickname,
-      col: COLORS[seatIdx], seat: SEATS[seatIdx], isMe: activePlayers[i].id === myId,
+      col: COLORS[i], seat: SEATS[seatIdx], isMe: activePlayers[i].id === myId,
       gold: 100, target: (i+1)%numPlayers, hp: CASTLE_HP, alive: true, flash: 0, fireCd: 0, 
       lastAttacker: -1, lastHitAt: -99, spawnCd: 0, income: BASE_INCOME, btn: [0,0,0,0], spawnCount: 0
     });
@@ -587,23 +600,34 @@ function processInput(pi, ai) {
 function emitInput(ai) {
   if (myPlayerIndex < 0 || !g) return;
   processInput(myPlayerIndex, ai);
-  // Relay this action to every other player individually (there is no
-  // server-side "ALL" room, so broadcasting to a literal targetId of 'ALL'
-  // never reaches anyone - each recipient's actual socket id is needed).
-  const payload = JSON.stringify({ fk_action: ai });
+  // Embed which player (by stable index) performed this action directly in
+  // the payload, so the receiver doesn't need to match socket ids at all -
+  // that matching was the likely point of failure before.
+  const payload = JSON.stringify({ fk_action: ai, pi: myPlayerIndex });
   for (const gp of g.players) {
     if (gp.id === myPlayerIndex) continue;
+    console.log('[fourkeeps] sending action', ai, 'to player', gp.id, 'socket', gp.socketId);
     socket.emit('private_message', { targetId: gp.socketId, message: payload });
   }
 }
 
 socket.on('private_message', (msg) => {
-  if (mode !== 'play') return;
+  console.log('[fourkeeps] private_message received', msg);
+  if (mode !== 'play' || !g) return;
   try {
     const data = JSON.parse(msg.message);
-    if (data.fk_action !== undefined) {
-      const pi = g.players.findIndex(p => p.socketId === msg.fromId);
-      if(pi >= 0 && pi !== myPlayerIndex) processInput(pi, data.fk_action);
+    if (data.fk_action === undefined) return;
+    let pi = Number.isInteger(data.pi) ? data.pi : -1;
+    if (pi < 0 || !g.players[pi]) {
+      // Fallback for older/alternate server relays that don't round-trip
+      // our custom fields: identify the sender by matching socket id.
+      pi = g.players.findIndex(p => p.socketId === msg.fromId);
+    }
+    if (pi >= 0 && pi !== myPlayerIndex) {
+      console.log('[fourkeeps] applying remote action', data.fk_action, 'from player', pi);
+      processInput(pi, data.fk_action);
+    } else {
+      console.warn('[fourkeeps] could not resolve sender for action', data, msg);
     }
   } catch(e) {}
 });
