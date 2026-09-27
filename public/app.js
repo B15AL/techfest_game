@@ -628,10 +628,93 @@ function applyRemoteAction(data, msg) {
   }
 }
 
+// ---------- Peer state resync ----------
+// The battle (unit positions, HP, gold...) only ever lives inside each
+// browser's own simulation - the server has no copy of it. If this tab gets
+// backgrounded (switching apps/tabs), requestAnimationFrame stops firing, so
+// this client's own sim/render freezes; if the socket also drops (common on
+// mobile when backgrounded), any actions opponents sent in the meantime are
+// lost for good. Rather than try to guess and fast-forward locally, when we
+// come back we ask a connected opponent for their current full state and
+// adopt it, so we snap back in sync instead of staying stuck/behind.
+let syncRequestId = 0;
+let awaitingSyncId = null;
+let syncTimeoutHandle = null;
+
+function requestSync() {
+  if (myPlayerIndex < 0 || !g || mode !== 'play') return;
+  syncRequestId++;
+  const reqId = syncRequestId;
+  awaitingSyncId = reqId;
+  console.log('[fourkeeps] requesting state sync from peers, reqId', reqId);
+  const payload = JSON.stringify({ fk_sync_req: reqId, pi: myPlayerIndex });
+  for (const gp of g.players) {
+    if (gp.id === myPlayerIndex) continue;
+    socket.emit('private_message', { targetId: gp.socketId, message: payload });
+  }
+  clearTimeout(syncTimeoutHandle);
+  syncTimeoutHandle = setTimeout(() => {
+    if (awaitingSyncId === reqId) {
+      console.warn('[fourkeeps] no sync response received in time for reqId', reqId);
+      awaitingSyncId = null;
+    }
+  }, 4000);
+}
+
+function serializeState() {
+  return {
+    time: g.time,
+    winner: g.winner,
+    order: g.order,
+    players: g.players.map(p => ({
+      id: p.id, gold: p.gold, target: p.target, hp: p.hp, alive: p.alive, spawnCount: p.spawnCount
+    })),
+    units: g.units.filter(u => !u.dead).map(u => ({
+      owner: u.owner, type: u.type, x: u.x, y: u.y, hp: u.hp, maxHp: u.maxHp, cd: u.cd, face: u.face, off: u.off
+    }))
+  };
+}
+
+function applySyncState(state) {
+  if (!g || !state) return;
+  g.time = Math.max(g.time, state.time || 0);
+  if (typeof state.winner === 'number') g.winner = state.winner;
+  if (Array.isArray(state.order)) g.order = state.order;
+  (state.players || []).forEach(sp => {
+    const p = g.players[sp.id];
+    if (!p) return;
+    p.gold = sp.gold; p.target = sp.target; p.hp = sp.hp; p.alive = sp.alive;
+    if (typeof sp.spawnCount === 'number') p.spawnCount = sp.spawnCount;
+  });
+  g.units = (state.units || []).map(su => ({
+    id: g.nextId++, owner: su.owner, type: su.type, x: su.x, y: su.y,
+    hp: su.hp, maxHp: su.maxHp, cd: su.cd, r: TYPES[su.type].r, face: su.face, off: su.off, dead: false
+  }));
+  console.log('[fourkeeps] applied peer state sync - time', g.time.toFixed(1), 'units', g.units.length);
+}
+
 socket.on('private_message', (msg) => {
   console.log('[fourkeeps] private_message received', msg);
   let data;
   try { data = JSON.parse(msg.message); } catch(e) { return; }
+
+  if (data.fk_sync_req !== undefined) {
+    // A peer just came back (tab/app switch or reconnect) and needs our
+    // current view of the battle to catch back up.
+    if (mode === 'play' && g) {
+      const reply = JSON.stringify({ fk_sync_state: data.fk_sync_req, state: serializeState() });
+      socket.emit('private_message', { targetId: msg.fromId, message: reply });
+    }
+    return;
+  }
+  if (data.fk_sync_state !== undefined) {
+    if (mode === 'play' && g && awaitingSyncId === data.fk_sync_state) {
+      applySyncState(data.state);
+      awaitingSyncId = null;
+    }
+    return;
+  }
+
   if (data.fk_action === undefined) return;
   if (mode !== 'play' || !g) {
     // This device may not have finished setting up its own game yet (a
@@ -641,6 +724,21 @@ socket.on('private_message', (msg) => {
     return;
   }
   applyRemoteAction(data, msg);
+});
+
+// Resync whenever this tab becomes visible again after being backgrounded.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && mode === 'play') {
+    lastTime = performance.now(); // don't try to bulk-simulate the gap ourselves
+    requestSync();
+  }
+});
+
+// Resync after any socket reconnect during an active match (covers the case
+// where backgrounding actually dropped the connection and we missed
+// messages entirely while disconnected).
+socket.on('connect', () => {
+  if (mode === 'play') requestSync();
 });
 
 const keyMap = {};
