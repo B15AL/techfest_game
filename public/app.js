@@ -611,25 +611,36 @@ function emitInput(ai) {
   }
 }
 
+let pendingRemoteActions = [];
+
+function applyRemoteAction(data, msg) {
+  let pi = Number.isInteger(data.pi) ? data.pi : -1;
+  if (pi < 0 || !g.players[pi]) {
+    // Fallback for older/alternate server relays that don't round-trip
+    // our custom fields: identify the sender by matching socket id.
+    pi = g.players.findIndex(p => p.socketId === msg.fromId);
+  }
+  if (pi >= 0 && pi !== myPlayerIndex) {
+    console.log('[fourkeeps] applying remote action', data.fk_action, 'from player', pi);
+    processInput(pi, data.fk_action);
+  } else {
+    console.warn('[fourkeeps] could not resolve sender for action', data, msg);
+  }
+}
+
 socket.on('private_message', (msg) => {
   console.log('[fourkeeps] private_message received', msg);
-  if (mode !== 'play' || !g) return;
-  try {
-    const data = JSON.parse(msg.message);
-    if (data.fk_action === undefined) return;
-    let pi = Number.isInteger(data.pi) ? data.pi : -1;
-    if (pi < 0 || !g.players[pi]) {
-      // Fallback for older/alternate server relays that don't round-trip
-      // our custom fields: identify the sender by matching socket id.
-      pi = g.players.findIndex(p => p.socketId === msg.fromId);
-    }
-    if (pi >= 0 && pi !== myPlayerIndex) {
-      console.log('[fourkeeps] applying remote action', data.fk_action, 'from player', pi);
-      processInput(pi, data.fk_action);
-    } else {
-      console.warn('[fourkeeps] could not resolve sender for action', data, msg);
-    }
-  } catch(e) {}
+  let data;
+  try { data = JSON.parse(msg.message); } catch(e) { return; }
+  if (data.fk_action === undefined) return;
+  if (mode !== 'play' || !g) {
+    // This device may not have finished setting up its own game yet (a
+    // brief race right at match start if a peer's action arrives first) -
+    // buffer it and replay once ready instead of silently dropping it.
+    pendingRemoteActions.push({ data, msg });
+    return;
+  }
+  applyRemoteAction(data, msg);
 });
 
 const keyMap = {};
@@ -674,11 +685,18 @@ function frame(now) {
 
 socket.on('game_started', (state) => {
   showScreen('screen-game');
+  pendingRemoteActions = []; // fresh match - discard anything stale from before
   newGame(state.players);
   mode = 'play';
   lastTime = performance.now();
   if(gameLoopReq) cancelAnimationFrame(gameLoopReq);
   gameLoopReq = requestAnimationFrame(frame);
+  // Replay any peer actions that arrived before we finished initializing.
+  if (pendingRemoteActions.length) {
+    const queued = pendingRemoteActions;
+    pendingRemoteActions = [];
+    queued.forEach(({ data, msg }) => applyRemoteAction(data, msg));
+  }
 });
 
 function showGameOver() {
